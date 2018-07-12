@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(magrittr)
 library(knitr)
-#library(caret)
+library(caret)
 #library(car)
 library(mice)
 #library(lars)
@@ -54,7 +54,7 @@ all.data[1:10, ] %>%
 
 We began by performing a thorough analysis on each predictor. 
 
-##SEX
+##Sex
 
 This predictor is categorical and is stored as either F for Female or M for male.
 
@@ -139,7 +139,7 @@ ggplot(all.data, aes(Equipment, TotalKg)) +
   scale_y_continuous(breaks=seq(0, 1500, 250), labels=seq(0, 1500, 250))
 ```
 
-#Age
+##Age
 
 The youngest competitor in the data set is 7 and the oldest is 90. It is likely that age will play a factor in total weight lifted as competitors in their prime years will be able to lift more weight.
 
@@ -152,7 +152,7 @@ ggplot(all.data, aes(Age, TotalKg)) +
        title = 'Comparison of Totals By Age')
 ```
 
-#BodyweightKg
+##BodyweightKg
 
 A competitor's weight should have a strong effect on their lifts. This is such a major factor that in powerlifting competitions, competitors are seperated based on their weight. Heavier competitors likely have more muscle and certainly have more mass. They are also likely to be taller and broader.
 
@@ -165,9 +165,9 @@ ggplot(all.data, aes(BodyweightKg, TotalKg)) +
        title = 'Comparison of Totals By Bodyweight')
 ```
 
-#Federation
+##Federation
 
-There are a number of federations that run competitions. A federation is an organization with it's own structure and rules for competition. This is an open data set and thus any federation, no matters it's size, can submit data. A federation may result in a measurable different in total weight. Some federations are designed for beginners or offer a more family friendly atmostphere while others aim towards creating fiercer competition. Some federations are also more strict with drug testing than others.
+There are a number of federations that run competitions. A federation is an organization with it's own structure and rules for competition. This is an open data set and thus any federation, no matters it's size, can submit data. As can be seen in the below plot there are a few big federations and many more smaller ones. The rulesets between the federations are a mess and some of the smaller federations do a poor job of enforcing their rules. Furthermore, there are far too many federations to use them as a factor in the regression.
 
 ```{r cache=TRUE, echo=FALSE, fig.width=4, fig.height=4, fig.align='center'}
 federation.data <- all.data %>%
@@ -186,6 +186,35 @@ ggplot(federation.data) +
   scale_y_continuous(expand = c(0, 0), breaks=seq(0, 65000, 5000), labels=seq(0, 65000, 5000))
 ```
 
+##Weigh In Times
+
+In order to try to capture the information from the federations despite their large numbers and discrepent and poorly enforced rule sets, we decided to use an unambiguous measure. Powerlifting competitions require competitors to weigh in to demonstrate their ability to lift in a selected division. When this weigh in occurs is critical. The early the weigh in is from the competition, the more time the competitor has to manipulate their weight after the weigh in to give them an advantage. 
+
+That is, a competitor weighing in at 150kg 2 hours before the competition and 24 hours before the competition will actually compete at far different weights. 
+
+Each federation either has weigh ins 2 hours or 24 hours before the competition. This information was collected via google searches and added to the data set. We anticipate that federations that allows earlier weigh ins should have higher totals as their true lifting weight may be significantly higher than the reported weight.
+
+```{r cache=TRUE, message=FALSE, echo=FALSE}
+weigh.in <- read_delim('C:\\Users\\Brian\\Desktop\\GradClasses\\Summer18\\621\\621finalproject\\weightimes.txt', delim='\t')
+weigh.in %>%
+  group_by(Weigh) %>%
+  count() %>%
+  kable()
+
+all.data <- inner_join(all.data, weigh.in, by=c('Federation'='Fed'))
+
+all.data %<>%
+  mutate(Weigh = factor(Weigh)) %>%
+  select(-Federation) %>%
+  select(TotalKg, everything())
+```
+
+##Steroid Testing
+
+We can't perform an analysis on powerlifting without discussing the elephant in the room. Steroid use is rampent in powerlifting and the various federations have taken different stands on their use. Generally speaking federations are either 'tested' or 'untested'. However, the truth is much more complicated than that. 
+
+Different federations have different banned substance lists. Some federations have both 'tested' and 'untested' divisions. Some federations technically test but allow for large loopholes that allow competitors to avoid detection. Some federations require 3 years of clean drug tests but the lingering effects of steroids can have positive effects for upwards of 5 years. In short, it is not feasible to include a meaningful predictor on steroid use for our data set.
+
 #Data Preperation
 
 Exploring the data resulted in us discovering that nearly 60% of the age data is missing. As useful as this data may have been, there is simply too much missing to consider imputation. Unfortunately, we will have to eliminate it from our data set. Furthermore, there is a small proportion of reponse variable that is missing. We will seperate out this data and use it as our evaluation data.
@@ -196,6 +225,8 @@ all.data %>%
   kable()
 ```
 
+Exploring the data set and its 130,000 observations we find that a small percent are missing the response variable TotalKg. We will seperate out this subset and it will form our evaluation set. 
+
 ```{r cache=TRUE, echo=FALSE, fig.width=4, fig.height=4, fig.align='center'}
 VIM::aggr(all.data, col=c('navyblue', 'yellow'),
           numbers=TRUE, sortVars=TRUE, 
@@ -203,44 +234,28 @@ VIM::aggr(all.data, col=c('navyblue', 'yellow'),
           gap=3, ylab=c('Missing Data', 'Pattern'), combined=TRUE)
 ```
 
-```{r cache=TRUE, echo=FALSE}
-evaluation.data <- all.data %>%
-  filter(is.na(TotalKg) & !is.na(Age))
-all.data %<>%
-  filter(!is.na(TotalKg) & !is.na(Age)) 
-```
-
-Revisiting the Federations category shows that are still 23 federations represented in our data. This is simply too many to use the federation as a category. We will restrict the data to only include the two most representative federations, USPA and USAPL. Together they account for nearly 80% of the available data.
-
-```{r cache=TRUE, echo=FALSE}
-all.data %>%
-  group_by(Federation) %>%
-  count() %>%
-  arrange(desc(n)) %>%
-  kable()
-
-all.data %<>%
-  filter(Federation %in% c('USPA', 'USAPL'))
-```
-
-This still leaves a small portion of missing BodyweightKg predictors. This data will be imputed. We will also split the data into a training set and a testing set for use in our regression modelling. 
+We are also missing values in the Age and BodyWeightKg predictors. This data will be imputed.
 
 ```{r cache=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
-#set.seed(123)
-#imputed.data <- mice(all.data[, -6], m=5, maxit=10, method='pmm', seed=500, printFlag=FALSE)
-#all.data.complete <- cbind(all.data[, 6], complete(imputed.data, 1))
+all.data.complete <- read_csv('C:\\Users\\Brian\\Desktop\\GradClasses\\Summer18\\621\\621finalproject\\all_data_complete.csv')
 ```
+
+From there we will create a training and testing partition. The training partition will contain 80% of the observations while the testing partition will contain the remaining 20%.
 
 ```{r cache=TRUE, echo=FALSE, warning=FALSE}
-#set.seed(1)
-#part <- caret::createDataPartition(all.data.complete$TotalKg, p=0.8, list=FALSE)
-#training.set <- all.data.complete %>%
-  #filter(row_number() %in% part)
-#testing.set <- all.data.complete %>%
-  #filter(!row_number() %in% part)
+set.seed(1)
+evaluation.data <- all.data.complete %>%
+  filter(is.na(TotalKg))
+all.data.complete %<>%
+  filter(!is.na(TotalKg)) 
+part <- createDataPartition(all.data.complete$TotalKg, p=0.8, list=FALSE)
+training.set <- all.data.complete %>%
+  filter(row_number() %in% part)
+testing.set <- all.data.complete %>%
+  filter(!row_number() %in% part)
 ```
 
-With the data preperation complete we have three data sets. The training set contains 52852 observations, the testing set contains 13211 observations and the evaluation set contains 1192 observations.
+With the data preperation complete we have three data sets. The training set contains 105822 observations, the testing set contains 26453 observations and the evaluation set contains 1314 observations.
 
 #Model Building
 

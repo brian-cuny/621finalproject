@@ -37,8 +37,23 @@ all.data %>%
   group_by(Federation, Equipment) %>%
   count()
 
-lmod <- lm(TotalKg ~ ., all.data)
-summary(lmod)
+
+set.seed(123)
+imputed.data <- mice(all.data[, -1], m=5, maxit=10, method='pmm', seed=500, printFlag=TRUE)
+all.data.complete <- cbind(all.data[, 1], complete(imputed.data, 1))
+
+
+all.data.complete %>%
+  map_dbl(~sum(is.na(.))/nrow(all.data.complete))
+
+write_csv(all.data.complete, 'all_data_complete.csv')
+
+
+
+
+
+
+
 
 
 
