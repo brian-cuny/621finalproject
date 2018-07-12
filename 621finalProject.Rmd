@@ -21,7 +21,7 @@ library(mice)
 #library(vcd)
 #library(AICcmodavg)
 #library(corrplot)
-powerlifting.data <- read_csv('C:\\Users\\Brian\\Desktop\\GradClasses\\Summer18\\621\\621finalproject\\openpowerlifting.csv', guess_max=8836) %>%
+powerlifting.data <- read_csv('https://raw.githubusercontent.com/brian-cuny/621finalproject/master/openpowerlifting.csv', guess_max=8836) %>%
   filter(!is.na(BestDeadliftKg) & !is.na(BestBenchKg) & !is.na(BestSquatKg)
          ) %>%
   select(MeetID, Sex, Equipment, Age, BodyweightKg, TotalKg) %>%
@@ -29,7 +29,7 @@ powerlifting.data <- read_csv('C:\\Users\\Brian\\Desktop\\GradClasses\\Summer18\
          Equipment = factor(Equipment, levels=c('Raw', 'Wraps', 'Single-ply', 'Multi-ply'))
          )
 
-meets.data <- read_csv('C:\\Users\\Brian\\Desktop\\GradClasses\\Summer18\\621\\621finalproject\\meets.csv') %>%
+meets.data <- read_csv('https://raw.githubusercontent.com/brian-cuny/621finalproject/master/meets.csv') %>%
   select(MeetID, Federation, MeetCountry)
 
 all.data <- inner_join(powerlifting.data, meets.data) %>%
