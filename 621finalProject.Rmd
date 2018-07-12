@@ -1,0 +1,251 @@
+---
+header-includes: \usepackage{fancyhdr} \pagestyle{fancy} \fancyhead[L]{\textbf{Powerlifting
+  Regression Analysis}} \fancyhead[R]{\thepage} \fancyfoot[C]{}
+output:
+  pdf_document:
+    df_print: kable
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE, cache=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(magrittr)
+library(knitr)
+#library(caret)
+#library(car)
+library(mice)
+#library(lars)
+#library(pscl)
+#library(vcd)
+#library(AICcmodavg)
+#library(corrplot)
+powerlifting.data <- read_csv('C:\\Users\\Brian\\Desktop\\GradClasses\\Summer18\\621\\621finalproject\\openpowerlifting.csv', guess_max=8836) %>%
+  filter(!is.na(BestDeadliftKg) & !is.na(BestBenchKg) & !is.na(BestSquatKg)
+         ) %>%
+  select(MeetID, Sex, Equipment, Age, BodyweightKg, TotalKg) %>%
+  mutate(Sex = factor(Sex),
+         Equipment = factor(Equipment, levels=c('Raw', 'Wraps', 'Single-ply', 'Multi-ply'))
+         )
+
+meets.data <- read_csv('C:\\Users\\Brian\\Desktop\\GradClasses\\Summer18\\621\\621finalproject\\meets.csv') %>%
+  select(MeetID, Federation, MeetCountry)
+
+all.data <- inner_join(powerlifting.data, meets.data) %>%
+  filter(MeetCountry == 'USA') %>%
+  select(-MeetID, -MeetCountry) %>%
+  select(Federation, everything())
+
+```
+
+#Abstract
+
+A dataset by Kaggle (here)[https://www.kaggle.com/open-powerlifting/powerlifting-database/home] contains observations on the peformance of athletes at various powerlifting competitions. The data contains 209,661 observations each one containing 5 predictors and 1 response variable. Our team's goal is to develop a regression that will accurately predict the final score of a powerlifter at a competition given that they are not disqualified. A powerlifter's score is in the form of kilograms, the sum of the total weight they lifted in the Squat, Deadlift and Bench portions of the competition.
+
+The first 10 rows of the data is sampled below.
+
+```{r cache=TRUE, echo=FALSE}
+all.data[1:10, ] %>%
+  kable()
+```
+
+#Data Exploration
+
+We began by performing a thorough analysis on each predictor. 
+
+##SEX
+
+This predictor is categorical and is stored as either F for Female or M for male.
+
+Appoximately 75% of the competitors are male and there is a clear seperation between the totals when comparing men and women. Both distributions are roughly normal and feature a number of upper and lower outliers.
+
+```{r cache=TRUE, echo=FALSE}
+all.data %>%
+  group_by(Sex) %>%
+  count() %>% 
+  kable()
+```
+
+```{r cache=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=4, fig.align='center'}
+male <- all.data %>% 
+  filter(Sex == 'M')
+female <- all.data %>%
+  filter(Sex == 'F')
+ggplot() +
+  geom_histogram(data=female, aes(TotalKg, fill=Sex), alpha=.5) +
+  geom_histogram(data=male, aes(TotalKg, fill=Sex), alpha=.5) +
+  theme_bw() +
+  labs(x = 'KG Total',
+       y = 'Count',
+       title = 'Comparison of Totals between Men and Women') +
+  theme(panel.grid.minor = element_blank(),
+        legend.position = c(.8, .8),
+        legend.title.align = 0.5,
+        legend.background = element_rect(color='black', fill='grey95'),
+        legend.text = element_text(size=12)
+        ) +
+  scale_x_continuous(breaks=seq(0, 1250, 250), labels=seq(0, 1250, 250),
+                     expand = c(0, 0, 1, 1)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  guides(fill = guide_legend(ncol=2,
+         label.position = 'top',
+         label.hjust = 0.5)
+  )
+```
+
+```{r cache=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=4, fig.align='center'}
+ggplot(all.data, aes(Sex, TotalKg)) +
+  geom_boxplot() +
+  geom_point(aes(color=Sex), show.legend = FALSE) +
+  theme_bw() +
+  labs(y = 'KG Total',
+       title = 'Comparison of Totals between Men and Women') +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank()) +
+  scale_y_continuous(breaks=seq(0, 1250, 250), labels=seq(0, 1250, 250))
+```
+
+##Equipment
+
+There are four different lifting categories, broken down by the equipment that is allowed to be used during the competition. Different equipment can have a marked difference on the amount of weight a competitor can lift. The categories are:
+
+*Raw: Only a belt is allowed
+*Straps: Wrist straps plus everything above is allowed
+*Single-ply: A single-ply lifting suit plus everything above is allowed
+*Multi-ply: A multi-ply lifting suit plus everything above is allowed
+
+```{r cache=TRUE, echo=FALSE, fig.width=4, fig.height=4, fig.align='center'}
+ggplot(all.data) +
+  geom_bar(aes(Equipment, fill=Equipment), show.legend = FALSE) +
+  theme_bw() +
+  labs(y = 'Count',
+       title = 'Frequency of Competition Equipment Use') +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank()) +
+  scale_color_brewer() +
+  scale_y_continuous(expand = c(0, 0))
+```
+
+```{r cache=TRUE, echo=FALSE, warning=FALSE, fig.width=4, fig.height=4, fig.align='center'}
+ggplot(all.data, aes(Equipment, TotalKg)) +
+  geom_boxplot() +
+  geom_point(aes(color=Equipment), show.legend = FALSE) +
+  theme_bw() +
+  labs(y = 'KG Total',
+       title = 'Comparison of Totals between Equipment Type') +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank()) +
+  scale_y_continuous(breaks=seq(0, 1500, 250), labels=seq(0, 1500, 250))
+```
+
+#Age
+
+The youngest competitor in the data set is 7 and the oldest is 90. It is likely that age will play a factor in total weight lifted as competitors in their prime years will be able to lift more weight.
+
+```{r cache=TRUE, echo=FALSE, warning=FALSE, fig.width=4, fig.height=4, fig.align='center'}
+ggplot(all.data, aes(Age, TotalKg)) +
+  geom_hex(show.legend = FALSE) +
+  theme_bw() +
+  labs(x = 'Age',
+       y = 'KG Total',
+       title = 'Comparison of Totals By Age')
+```
+
+#BodyweightKg
+
+A competitor's weight should have a strong effect on their lifts. This is such a major factor that in powerlifting competitions, competitors are seperated based on their weight. Heavier competitors likely have more muscle and certainly have more mass. They are also likely to be taller and broader.
+
+```{r cache=TRUE, echo=FALSE, warning=FALSE, fig.width=4, fig.height=4, fig.align='center'}
+ggplot(all.data, aes(BodyweightKg, TotalKg)) +
+  geom_hex(show.legend = FALSE) +
+  theme_bw() +
+  labs(x = 'KG Bodyweight',
+       y = 'KG Total',
+       title = 'Comparison of Totals By Bodyweight')
+```
+
+#Federation
+
+There are a number of federations that run competitions. A federation is an organization with it's own structure and rules for competition. This is an open data set and thus any federation, no matters it's size, can submit data. A federation may result in a measurable different in total weight. Some federations are designed for beginners or offer a more family friendly atmostphere while others aim towards creating fiercer competition. Some federations are also more strict with drug testing than others.
+
+```{r cache=TRUE, echo=FALSE, fig.width=4, fig.height=4, fig.align='center'}
+federation.data <- all.data %>%
+  group_by(Federation) %>%
+  count()
+
+ggplot(federation.data) +
+  geom_bar(aes(reorder(Federation, n), n, fill=factor(n)), stat='identity', show.legend = FALSE) +
+  coord_flip() +
+  theme_bw() +
+  labs(x = 'Federation',
+       y = 'Count',
+       title = 'Competitors by Federation') +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.y = element_blank()) +
+  scale_y_continuous(expand = c(0, 0), breaks=seq(0, 65000, 5000), labels=seq(0, 65000, 5000))
+```
+
+#Data Preperation
+
+Exploring the data resulted in us discovering that nearly 60% of the age data is missing. As useful as this data may have been, there is simply too much missing to consider imputation. Unfortunately, we will have to eliminate it from our data set. Furthermore, there is a small proportion of reponse variable that is missing. We will seperate out this data and use it as our evaluation data.
+
+```{r cache=TRUE, echo=FALSE}
+all.data %>%
+  map_dbl(~sum(is.na(.))/nrow(all.data)) %>%
+  kable()
+```
+
+```{r cache=TRUE, echo=FALSE, fig.width=4, fig.height=4, fig.align='center'}
+VIM::aggr(all.data, col=c('navyblue', 'yellow'),
+          numbers=TRUE, sortVars=TRUE, 
+          labels=names(all.data), cex.axis=.7,
+          gap=3, ylab=c('Missing Data', 'Pattern'), combined=TRUE)
+```
+
+```{r cache=TRUE, echo=FALSE}
+evaluation.data <- all.data %>%
+  filter(is.na(TotalKg) & !is.na(Age))
+all.data %<>%
+  filter(!is.na(TotalKg) & !is.na(Age)) 
+```
+
+Revisiting the Federations category shows that are still 23 federations represented in our data. This is simply too many to use the federation as a category. We will restrict the data to only include the two most representative federations, USPA and USAPL. Together they account for nearly 80% of the available data.
+
+```{r cache=TRUE, echo=FALSE}
+all.data %>%
+  group_by(Federation) %>%
+  count() %>%
+  arrange(desc(n)) %>%
+  kable()
+
+all.data %<>%
+  filter(Federation %in% c('USPA', 'USAPL'))
+```
+
+This still leaves a small portion of missing BodyweightKg predictors. This data will be imputed. We will also split the data into a training set and a testing set for use in our regression modelling. 
+
+```{r cache=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
+#set.seed(123)
+#imputed.data <- mice(all.data[, -6], m=5, maxit=10, method='pmm', seed=500, printFlag=FALSE)
+#all.data.complete <- cbind(all.data[, 6], complete(imputed.data, 1))
+```
+
+```{r cache=TRUE, echo=FALSE, warning=FALSE}
+#set.seed(1)
+#part <- caret::createDataPartition(all.data.complete$TotalKg, p=0.8, list=FALSE)
+#training.set <- all.data.complete %>%
+  #filter(row_number() %in% part)
+#testing.set <- all.data.complete %>%
+  #filter(!row_number() %in% part)
+```
+
+With the data preperation complete we have three data sets. The training set contains 52852 observations, the testing set contains 13211 observations and the evaluation set contains 1192 observations.
+
+#Model Building
+
+
+
+
+
+
